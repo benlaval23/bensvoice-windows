@@ -1,0 +1,66 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Make icon
+        run: python -c "from bensvoice.app import icon_image; icon_image('ready').save('icon.ico', sizes=[(16,16),(32,32),(48,48),(64,64)])"
+
+      - name: Build exe
+        run: pyinstaller --noconfirm --windowed --name BensVoice --icon icon.ico --collect-all onnx_asr --hidden-import pystray._win32 run.py
+
+      - name: Self-test the packaged app
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\BensVoice\BensVoice.exe -ArgumentList "--selftest", "$PWD\selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Transcribe a spoken sample with the packaged app
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Speech
+          $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+          $s.SetOutputToWaveFile("$PWD\sample.wav")
+          $s.Speak("Hello from Windows. Let's meet on Thursday at three.")
+          $s.Dispose()
+          $p = Start-Process dist\BensVoice\BensVoice.exe -ArgumentList "--transcribe", "$PWD\sample.wav", "$PWD\transcript.txt" -Wait -PassThru
+          Get-Content transcript.txt
+          if ($p.ExitCode -ne 0 -or -not (Select-String -Path transcript.txt -Pattern "Thursday" -Quiet)) { exit 1 }
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist\BensVoice -DestinationPath BensVoice-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BensVoice-Windows
+          path: BensVoice-Windows.zip
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: BensVoice-Windows.zip
