@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw
 from . import composer, winapi
 from .config import APP_DIR, CONFIG_PATH, load_config
 from .recorder import Recorder
+from .worker import ModelHost
 
 DICTATE, COMPOSE = "dictate", "compose"
 TAP_THRESHOLD = 0.3
@@ -32,7 +33,10 @@ class App:
         self.key_labels = {DICTATE: dictate_key.title(), COMPOSE: compose_key.title()}
 
         self.recorder = Recorder()
-        self.transcriber = None
+        # The model process exits after this long idle and restarts (in the background) on the next key press.
+        self.host = ModelHost(idle_seconds=float(config.get("keepModelLoadedMinutes", 2)) * 60)
+        self.model_ok = False
+        self.loading = True
         self.work = ThreadPoolExecutor(max_workers=1)
         self.events = queue.Queue()
 
@@ -65,17 +69,16 @@ class App:
         self.icon.run()
 
     def load_model(self):
-        from .transcriber import Transcriber
-        self.set_status("Loading Parakeet (first run downloads ~650 MB)…")
+        self.set_status("Loading Parakeet (first run downloads ~660 MB)…")
         self.start_spinner()
         try:
-            t = Transcriber()
-            t.warm_up()
-            self.transcriber = t
+            self.host.wait_ready()
+            self.model_ok = True
             self.set_status("Ready")
         except Exception as e:
             logging.exception("Model failed")
             self.set_status(f"Model failed: {e}")
+        self.loading = False
         self.set_icon("ready")
 
     # MARK: Hotkeys
@@ -125,9 +128,13 @@ class App:
         return any(vk in self.down for vk, m in self.keys.items() if m == self.recording)
 
     def begin(self, mode):
-        if self.transcriber is None:
+        if not self.model_ok:
             winsound.MessageBeep()
+            if not self.loading:  # e.g. the first download failed while offline: try again
+                self.loading = True
+                self.work.submit(self.load_model)
             return
+        self.work.submit(self.host.start)  # reload the model while the user talks, if it was unloaded
         self.target_app = winapi.foreground_app_name()
         try:
             self.recorder.start()
@@ -164,7 +171,7 @@ class App:
 
     def complete(self, mode, audio, selection, app_name):
         try:
-            text = self.transcriber.transcribe(audio)
+            text = self.host.transcribe(audio)
             if mode == COMPOSE and text:
                 text = composer.compose(text, selection, app_name)
             if text:
@@ -223,7 +230,17 @@ class App:
 COLORS = {"ready": (60, 60, 67), "dictate": (220, 50, 47), "compose": (124, 77, 255), "busy": (60, 60, 67)}
 
 
+_icons = {}
+
+
 def icon_image(state, angle=0):
+    """Drawn once per state / spinner frame, then cached."""
+    if (state, angle) not in _icons:
+        _icons[state, angle] = _draw_icon(state, angle)
+    return _icons[state, angle]
+
+
+def _draw_icon(state, angle):
     s = 64
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)

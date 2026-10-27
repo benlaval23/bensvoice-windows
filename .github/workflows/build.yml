@@ -50,6 +50,28 @@ jobs:
           Get-Content transcript.txt
           if ($p.ExitCode -ne 0 -or -not (Select-String -Path transcript.txt -Pattern "Thursday" -Quiet)) { exit 1 }
 
+      - name: Run the real app and measure idle memory and CPU
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:APPDATA\BensVoice" | Out-Null
+          '{ "keepModelLoadedMinutes": 0.25 }' | Set-Content "$env:APPDATA\BensVoice\config.json"
+          Start-Process dist\BensVoice\BensVoice.exe
+          Start-Sleep 12
+          $loaded = Get-Process BensVoice
+          "while model loaded: $($loaded.Count) processes, " + (($loaded | ForEach-Object { "{0:N0} MB" -f ($_.WorkingSet64 / 1MB) }) -join " + ")
+          Start-Sleep 30
+          $p = Get-Process BensVoice
+          $cpu0 = ($p | Measure-Object CPU -Sum).Sum
+          Start-Sleep 30
+          $p = Get-Process BensVoice
+          $cpu = ($p | Measure-Object CPU -Sum).Sum - $cpu0
+          $mb = ($p | Measure-Object WorkingSet64 -Sum).Sum / 1MB
+          "after idle unload: $($p.Count) process, {0:N0} MB, {1:N2} s CPU over 30 s" -f $mb, $cpu
+          Get-Content "$env:APPDATA\BensVoice\bensvoice.log"
+          Stop-Process -Name BensVoice
+          Remove-Item "$env:APPDATA\BensVoice\config.json"
+          if ($loaded.Count -ne 2 -or $p.Count -ne 1 -or $mb -gt 150 -or $cpu -gt 0.5) { exit 1 }
+
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path dist\BensVoice -DestinationPath BensVoice-Windows.zip

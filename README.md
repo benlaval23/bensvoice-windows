@@ -16,6 +16,8 @@ This is the Windows version of [BensVoice for Mac](https://github.com/benlaval23
 
 The tray icon shows the state: grey waveform (ready), red (dictating), purple sparkle (composing), spinner (transcribing / waiting on Haiku). Hover over it or click it to see the status line.
 
+It's built to stay out of the way. The speech model (~850 MB in memory) runs in a helper process that **quits after 2 minutes idle**, so most of the time BensVoice is a single small process using almost no CPU. Holding a hotkey starts the model again in the background while you're still talking, so it's usually ready by the time you let go. The mic only runs while you hold a key.
+
 In compose mode, Haiku also gets the name of the app you're in (casual tone for Slack or Teams, professional for Outlook, technical for Terminal or VS Code) and any text you have selected (e.g. the message you're replying to, or text to rewrite).
 
 ## Requirements
@@ -83,6 +85,7 @@ Optional `%APPDATA%\BensVoice\config.json` (tray menu › **Open Settings Folder
 | `anthropicApiKey` | none | Use the API directly instead of the `claude` CLI |
 | `model` | `claude-haiku-5-5` | Model when using an API key |
 | `cliModel` | `haiku` | Model alias passed to `claude -p --model` |
+| `keepModelLoadedMinutes` | `2` | How long the speech model stays in memory after you last used it. Higher means no reload wait. Lower means memory is freed sooner |
 | `asrModel` | `nemo-parakeet-tdt-0.6b-v2` | Speech model. `nemo-parakeet-tdt-0.6b-v3` adds 24 more European languages |
 | `quantization` | `int8` | Smaller, faster model. Set to `""` for full precision (bigger download, slightly more accurate) |
 
@@ -96,6 +99,7 @@ Hotkeys can be any of: `right alt`, `left alt`, `right ctrl`, `left ctrl`, `righ
 - **Two apps react to the same key**: quit any other dictation app that uses the same hotkey, or change the BensVoice keys in the config.
 - **Compose says it couldn't find `claude`**: BensVoice looks in `%USERPROFILE%\.local\bin`, your `PATH`, and `%APPDATA%\npm`. Make sure `claude` works in a new PowerShell window, then restart BensVoice.
 - **Wrong microphone**: BensVoice uses the Windows default input device (Settings › System › Sound › Input).
+- **The first word after a break takes a moment**: that's the model reloading after it was unloaded to save memory (about 1–3 s, mostly hidden while you talk). To keep it loaded longer, raise `keepModelLoadedMinutes`, e.g. `30`.
 - **Something else**: the log is at `%APPDATA%\BensVoice\bensvoice.log`.
 - **Test transcription without the GUI**: `BensVoice.exe --transcribe some.wav out.txt`
 
@@ -116,6 +120,7 @@ To build the exe yourself: `pip install pyinstaller`, then run the same `pyinsta
 
 - `winapi.py`: a low-level keyboard hook (watches keys, never blocks them), the clipboard swap used to paste (your clipboard is restored afterwards and the temporary text is kept out of Win+V history), and Ctrl+C to read the selection for compose.
 - `transcriber.py`: Parakeet TDT via [onnx-asr](https://github.com/istupakov/onnx-asr) on the CPU. Recordings longer than 20 s are split at the quietest point near each boundary.
+- `worker.py`: the model runs in a child process that exits when idle, so all of its memory goes back to Windows. The tray process never loads numpy or ONNX Runtime.
 - `recorder.py`: 16 kHz mono capture. The mic only runs while you hold a key.
 - `composer.py`: the Haiku prompt, through either the `claude` CLI or the Messages API.
 - `app.py`: the tray icon and hotkey logic.

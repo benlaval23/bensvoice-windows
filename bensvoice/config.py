@@ -5,6 +5,7 @@ from pathlib import Path
 
 APP_DIR = Path(os.environ.get("APPDATA") or Path.home()) / "BensVoice"
 CONFIG_PATH = APP_DIR / "config.json"
+SAMPLE_RATE = 16_000
 
 
 def load_config():

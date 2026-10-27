@@ -3,8 +3,7 @@ import wave
 
 import numpy as np
 
-from .config import load_config
-from .recorder import SAMPLE_RATE
+from .config import SAMPLE_RATE, load_config
 
 # onnx-asr handles the TDT decoding; we cut long recordings into windows ourselves to keep memory flat.
 WINDOW = 20 * SAMPLE_RATE
@@ -13,10 +12,20 @@ WINDOW = 20 * SAMPLE_RATE
 class Transcriber:
     def __init__(self):
         import onnx_asr  # slow import, keep it off the startup path
+        import onnxruntime as ort
 
         config = load_config()
         quantization = config.get("quantization", "int8") or None
-        self.model = onnx_asr.load_model(config.get("asrModel", "nemo-parakeet-tdt-0.6b-v2"), quantization=quantization)
+        so = ort.SessionOptions()
+        so.log_severity_level = 3
+        # Measured on Parakeet int8: no prepacking saves ~200 MB for a few ms per run, and without spinning
+        # the threads go idle as soon as a transcription ends instead of burning CPU.
+        so.add_session_config_entry("session.disable_prepacking", "1")
+        so.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        so.add_session_config_entry("session.inter_op.allow_spinning", "0")
+        so.enable_cpu_mem_arena = False
+        self.model = onnx_asr.load_model(config.get("asrModel", "nemo-parakeet-tdt-0.6b-v2"), quantization=quantization,
+                                         sess_options=so, providers=["CPUExecutionProvider"])
 
     def warm_up(self):
         self.transcribe(np.zeros(SAMPLE_RATE, np.float32))
