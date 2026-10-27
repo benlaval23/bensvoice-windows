@@ -23,7 +23,9 @@ def rss_mb():
         c.cb = ctypes.sizeof(c)
         kernel32 = ctypes.WinDLL("kernel32")
         kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-        ctypes.WinDLL("psapi").GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(c), c.cb)
+        get_info = ctypes.WinDLL("psapi").GetProcessMemoryInfo
+        get_info.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+        get_info(kernel32.GetCurrentProcess(), ctypes.byref(c), c.cb)
         return c.WorkingSetSize / 1e6
     import resource
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1e6 if sys.platform == "darwin" else 1e3)
