@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 import time
 import traceback
@@ -7,6 +8,12 @@ from .config import APP_DIR
 
 
 def main():
+    # The packaged app has no console: give libraries that print (download progress bars) somewhere to write.
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
     APP_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=APP_DIR / "bensvoice.log", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s", encoding="utf-8")
